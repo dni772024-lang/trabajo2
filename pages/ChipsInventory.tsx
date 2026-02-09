@@ -20,7 +20,7 @@ const ChipsInventory: React.FC = () => {
 
     const fetchChips = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/chips');
+            const res = await fetch('/api/chips');
             const data = await res.json();
             setChips(data);
         } catch (error) {
@@ -34,8 +34,8 @@ const ChipsInventory: React.FC = () => {
         e.preventDefault();
         try {
             const url = editingChip
-                ? `http://localhost:3001/api/chips/${editingChip.id}`
-                : 'http://localhost:3001/api/chips';
+                ? `/api/chips/${editingChip.id}`
+                : '/api/chips';
 
             const method = editingChip ? 'PUT' : 'POST';
 
@@ -64,7 +64,7 @@ const ChipsInventory: React.FC = () => {
     const handleDelete = async (id: string) => {
         if (!confirm('¿Está seguro de eliminar este chip?')) return;
         try {
-            await fetch(`http://localhost:3001/api/chips/${id}`, { method: 'DELETE' });
+            await fetch(`/api/chips/${id}`, { method: 'DELETE' });
             fetchChips();
         } catch (error) {
             console.error('Error deleting chip:', error);

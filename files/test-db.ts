@@ -1,8 +1,8 @@
 // test-db.ts
 // Script para probar la conexión a PostgreSQL
 
-import Database from './services/database';
-import { storagePostgres } from './services/storagePostgres';
+import { pool } from '../server/db';
+import { storage } from '../server/storage';
 
 async function testDatabaseConnection() {
   console.log('🔍 Probando conexión a PostgreSQL...\n');
@@ -10,16 +10,13 @@ async function testDatabaseConnection() {
   try {
     // Test 1: Conexión básica
     console.log('Test 1: Verificando conexión básica...');
-    const isConnected = await Database.testConnection();
+    const client = await pool.connect();
+    client.release();
+    console.log('✅ Conexión establecida');
     
-    if (!isConnected) {
-      console.error('❌ No se pudo conectar a la base de datos');
-      process.exit(1);
-    }
-
     // Test 2: Verificar tablas
     console.log('\nTest 2: Verificando tablas...');
-    const tables = await Database.query(`
+    const tables = await pool.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public'
@@ -32,34 +29,34 @@ async function testDatabaseConnection() {
     // Test 3: Contar registros en cada tabla
     console.log('\nTest 3: Contando registros...');
     
-    const userCount = await Database.query('SELECT COUNT(*) FROM users');
+    const userCount = await pool.query('SELECT COUNT(*) FROM users');
     console.log(`  Usuarios: ${userCount.rows[0].count}`);
     
-    const empCount = await Database.query('SELECT COUNT(*) FROM employees');
+    const empCount = await pool.query('SELECT COUNT(*) FROM employees');
     console.log(`  Empleados: ${empCount.rows[0].count}`);
     
-    const eqCount = await Database.query('SELECT COUNT(*) FROM equipment');
+    const eqCount = await pool.query('SELECT COUNT(*) FROM equipment');
     console.log(`  Equipos: ${eqCount.rows[0].count}`);
     
-    const catCount = await Database.query('SELECT COUNT(*) FROM categories');
+    const catCount = await pool.query('SELECT COUNT(*) FROM categories');
     console.log(`  Categorías: ${catCount.rows[0].count}`);
     
-    const loanCount = await Database.query('SELECT COUNT(*) FROM loans');
+    const loanCount = await pool.query('SELECT COUNT(*) FROM loans');
     console.log(`  Préstamos: ${loanCount.rows[0].count}`);
 
     // Test 4: Probar servicios de almacenamiento
     console.log('\nTest 4: Probando servicios de almacenamiento...');
     
-    const users = await storagePostgres.getUsers();
+    const users = await storage.getUsers();
     console.log(`  ✅ getUsers(): ${users.length} usuarios obtenidos`);
     
-    const employees = await storagePostgres.getEmployees();
+    const employees = await storage.getEmployees();
     console.log(`  ✅ getEmployees(): ${employees.length} empleados obtenidos`);
     
-    const equipment = await storagePostgres.getEquipment();
+    const equipment = await storage.getEquipment();
     console.log(`  ✅ getEquipment(): ${equipment.length} equipos obtenidos`);
     
-    const categories = await storagePostgres.getCategories();
+    const categories = await storage.getCategories();
     console.log(`  ✅ getCategories(): ${categories.length} categorías obtenidas`);
 
     // Test 5: Verificar usuario admin
@@ -87,7 +84,7 @@ async function testDatabaseConnection() {
     console.error('  4. El script database-schema.sql se ejecutó correctamente\n');
     process.exit(1);
   } finally {
-    await Database.close();
+    await pool.end();
   }
 }
 

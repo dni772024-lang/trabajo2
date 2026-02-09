@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { Equipment, Loan } from "../types";
 
 // Always use const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const geminiService = {
   getInventoryInsights: async (equipment: Equipment[], loans: Loan[]) => {
@@ -26,11 +26,13 @@ export const geminiService = {
         model,
         contents: prompt,
       });
-      // The GenerateContentResponse object features a text property (not a method).
-      return response.text;
+      // Access the text property directly
+      const text = response.text || '';
+      return text;
     } catch (error) {
       console.error("Gemini Error:", error);
       return "No se pudo generar el análisis inteligente en este momento.";
     }
   }
 };
+
