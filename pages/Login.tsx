@@ -20,18 +20,30 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
 
     try {
-      const users = await storage.getUsers();
-      // Búsqueda insensible a mayúsculas para el nombre de usuario
-      const user = users.find(u => u.username.toLowerCase() === username.toLowerCase().trim());
+      // Call the backend login endpoint
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: username.trim(),
+          password
+        }),
+      });
 
-      // En un entorno real, validación debería ser en backend, pero mantenemos lógica de compatibilidad
-      if (user && user.password === password) {
-        storage.setCurrentUser(user);
-        onLogin(user);
-        navigate('/');
-      } else {
-        setError('Credenciales incorrectas. Verifique su usuario y contraseña.');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.error || 'Credenciales incorrectas. Verifique su usuario y contraseña.');
+        return;
       }
+
+      const user = await response.json();
+
+      // Store user in localStorage and update app state
+      storage.setCurrentUser(user);
+      onLogin(user);
+      navigate('/');
     } catch (err) {
       console.error('Login error:', err);
       setError('Error de conexión al servidor.');

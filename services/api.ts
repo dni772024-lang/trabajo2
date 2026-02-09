@@ -27,6 +27,13 @@ export const api = {
     checkUsername: (username: string, excludeId?: string) =>
         api.request(`/auth/check-username?username=${encodeURIComponent(username)}${excludeId ? `&excludeId=${excludeId}` : ''}`),
 
+    // Authentication
+    login: (username: string, password: string) =>
+        api.request('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        }),
+
     // Employees
     getEmployees: () => api.request('/employees'),
     addEmployee: (employee: any) => api.request('/employees', { method: 'POST', body: JSON.stringify(employee) }),

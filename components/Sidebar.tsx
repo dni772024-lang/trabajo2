@@ -110,7 +110,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user }) => {
   ];
 
   const visibleMenu = menuStructure.filter(item =>
-    user.role === 'Administrador' || user.accessibleModules.includes(item.moduleName)
+    user.role === 'admin' || user.accessibleModules?.includes(item.moduleName) || false
   );
 
   return (
@@ -138,8 +138,8 @@ const Sidebar: React.FC<SidebarProps> = ({ user }) => {
               <button
                 onClick={() => toggleMenu(item.name)}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-200 group ${hasActiveChild
-                    ? 'bg-blue-50 text-[#1e3a8a]'
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                  ? 'bg-blue-50 text-[#1e3a8a]'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 <div className="flex items-center gap-3">
@@ -158,8 +158,8 @@ const Sidebar: React.FC<SidebarProps> = ({ user }) => {
                         key={sub.name}
                         to={sub.path}
                         className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-[12px] font-bold transition-all ${isActive
-                            ? 'bg-[#1e3a8a] text-white shadow-md'
-                            : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                          ? 'bg-[#1e3a8a] text-white shadow-md'
+                          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
                           }`}
                       >
                         {sub.name}

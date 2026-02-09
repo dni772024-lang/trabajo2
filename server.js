@@ -163,6 +163,70 @@ app.get('/api/auth/check-username', async (req, res) => {
     }
 });
 
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        console.log('🔍 Login attempt:', { username, passwordLength: password?.length });
+
+        if (!username || !password) {
+            console.log('❌ Missing credentials');
+            return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+        }
+
+        // Query user from database (case-insensitive username)
+        const result = await pool.query(
+            'SELECT id, username, password_hash, full_name, role, is_active FROM users WHERE LOWER(username) = LOWER($1)',
+            [username.trim()]
+        );
+
+        console.log('📊 Query result:', { found: result.rows.length, username: username.trim() });
+
+        if (result.rows.length === 0) {
+            console.log('❌ User not found');
+            return res.status(401).json({ error: 'Credenciales incorrectas' });
+        }
+
+        const user = result.rows[0];
+        console.log('👤 User found:', {
+            id: user.id,
+            username: user.username,
+            isActive: user.is_active,
+            passwordHashLength: user.password_hash?.length,
+            passwordHash: user.password_hash,
+            providedPassword: password,
+            passwordsMatch: user.password_hash === password
+        });
+
+        // Check if user is active
+        if (!user.is_active) {
+            console.log('❌ User inactive');
+            return res.status(401).json({ error: 'Usuario inactivo' });
+        }
+
+        // Validate password (plain text comparison for now)
+        if (user.password_hash !== password) {
+            console.log('❌ Password mismatch');
+            return res.status(401).json({ error: 'Credenciales incorrectas' });
+        }
+
+        // Return user data (without password)
+        res.json({
+            id: user.id,
+            username: user.username,
+            fullName: user.full_name,
+            role: user.role,
+            isActive: user.is_active
+        });
+
+        console.log(`✅ Login exitoso: ${user.username}`);
+    } catch (err) {
+        console.error('Error en login:', err.message);
+        res.status(500).json({ error: 'Error en el servidor' });
+    }
+});
+
 // Fallback
 app.use((req, res) => {
     res.status(404).json({ error: 'Ruta no encontrada', path: req.path });
