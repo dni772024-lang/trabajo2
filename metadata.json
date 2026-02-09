@@ -1,0 +1,7 @@
+{
+  "name": "Copy of proyecto2-1",
+  "description": "Un sistema integral para el control de inventario, registro de empleados y gestión de préstamos/devoluciones de equipos electrónicos con análisis inteligente.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
