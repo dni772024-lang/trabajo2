@@ -459,6 +459,26 @@ app.get('/api/stats/alerts', async (req, res) => {
 });
 
 
-app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+// Iniciar servidor
+const server = app.listen(port, () => {
+    console.log(`✅ Server running on http://localhost:${port}`);
+    console.log(`   Frontend: http://localhost:5173`);
+    console.log(`   Health Check: http://localhost:${port}/api/health`);
+});
+
+// Mantener el servidor activo
+process.on('SIGTERM', () => {
+    console.log('SIGTERM recibido, cerrando servidor...');
+    server.close(() => {
+        console.log('Servidor cerrado');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT recibido, cerrando servidor...');
+    server.close(() => {
+        console.log('Servidor cerrado');
+        process.exit(0);
+    });
 });
