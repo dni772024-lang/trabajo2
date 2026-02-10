@@ -7,10 +7,10 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const dbConfig = {
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    password: process.env.DB_PASSWORD,
-    port: parseInt(process.env.DB_PORT || '5432'),
+    user: process.env.DB_USER || 'postgres',
+    host: process.env.DB_HOST || 'localhost',
+    password: process.env.DB_PASSWORD || 'Salayer*109',
+    port: parseInt(process.env.DB_PORT || '5433'),
 };
 
 const targetDbName = process.env.DB_NAME || 'equipment_control';
@@ -59,6 +59,19 @@ async function init() {
         console.log('📜 Ejecutando esquema SQL...');
         await dbClient.query(schemaSql);
         console.log('✅ Esquema aplicado exitosamente.');
+
+        // Actualizar permisos del usuario administrador para incluir Configuración
+        console.log('🔄 Actualizando permisos del administrador...');
+        const adminModules = JSON.stringify([
+            "Dashboard", "Préstamos", "Equipos", "Empleados", 
+            "Usuarios", "Configuración", "Reportes", "Chips", "Categorías", "Centro de Control"
+        ]);
+        await dbClient.query(`
+            UPDATE users 
+            SET accessible_modules = $1
+            WHERE username = 'admin.pro.001'
+        `, [adminModules]);
+        console.log('✅ Permisos de administrador actualizados.');
 
     } catch (err) {
         console.error('❌ Error applying schema:', err);

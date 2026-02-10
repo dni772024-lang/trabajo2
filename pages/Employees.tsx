@@ -22,8 +22,10 @@ const Employees: React.FC = () => {
   const currentUser = storage.getCurrentUser();
   const isReadOnly = currentUser?.role === 'Consulta';
 
-  const [view, setView] = useState<'list' | 'new'>(viewParam as any);
+  const [view, setView] = useState<'list' | 'new' | 'distribution'>(viewParam as any);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [distribution, setDistribution] = useState<Record<string, { rank: string; count: number }[]>>({});
+  const [detailRows, setDetailRows] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -55,12 +57,35 @@ const Employees: React.FC = () => {
     }
   };
 
+  const loadDistribution = async () => {
+    try {
+      const res = await fetch('/api/employees/distribution');
+      const json = await res.json();
+      setDistribution(json.summary || {});
+      setView('distribution');
+    } catch (err) {
+      console.error('Error loading distribution:', err);
+    }
+  };
+
+  const loadDetail = async (department: string, rank: string) => {
+    try {
+      const q = new URLSearchParams({ department, rank });
+      const res = await fetch(`/api/employees/filter?${q.toString()}`);
+      const json = await res.json();
+      setDetailRows(json || []);
+      // ensure distribution view active
+      setView('distribution');
+    } catch (err) {
+      console.error('Error loading detail:', err);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
 
-    const newEmployee: Employee = {
-      id: crypto.randomUUID(),
+    const newEmployee: Partial<Employee> = {
       name: formData.name || '',
       lastName: formData.lastName || '',
       rank: formData.rank || RANGOS[0],
@@ -163,12 +188,20 @@ const Employees: React.FC = () => {
             LISTA
           </button>
           {!isReadOnly && (
-            <button
-              onClick={() => navigate('/employees?v=new')}
-              className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${view === 'new' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-500 hover:bg-slate-50'}`}
-            >
-              NUEVO EMPLEADO
-            </button>
+            <>
+              <button
+                onClick={() => navigate('/employees?v=new')}
+                className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${view === 'new' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-500 hover:bg-slate-50'}`}
+              >
+                NUEVO EMPLEADO
+              </button>
+              <button
+                onClick={() => loadDistribution()}
+                className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${view === 'distribution' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-200' : 'text-slate-500 hover:bg-slate-50'}`}
+              >
+                DISTRIBUCIÓN DE PERSONAL
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -265,6 +298,59 @@ const Employees: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {view === 'distribution' && (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl">
+            <h3 className="text-lg font-bold">Distribución de Personal por Departamento</h3>
+            {Object.keys(distribution).length === 0 && (
+              <p className="text-sm text-slate-400 mt-4">No hay datos para mostrar</p>
+            )}
+            {Object.entries(distribution).map(([dept, ranks]) => (
+              <div key={dept} className="mt-6">
+                <div className="font-bold text-slate-800">{dept} ({ranks.reduce((s, r) => s + r.count, 0)} total)</div>
+                <ul className="ml-4 mt-2 list-disc">
+                  {ranks.map(r => (
+                    <li key={r.rank} className="cursor-pointer text-slate-600 hover:text-slate-900" onClick={() => loadDetail(dept, r.rank)}>
+                      {r.rank}: {r.count}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {detailRows.length > 0 && (
+            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl">
+              <h3 className="text-lg font-bold">Detalle</h3>
+              <div className="overflow-x-auto mt-4">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      <th className="px-4 py-2 text-sm font-bold">ID</th>
+                      <th className="px-4 py-2 text-sm font-bold">Nombre Completo</th>
+                      <th className="px-4 py-2 text-sm font-bold">Placa</th>
+                      <th className="px-4 py-2 text-sm font-bold">Rango</th>
+                      <th className="px-4 py-2 text-sm font-bold">Departamento</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailRows.map(row => (
+                      <tr key={row.id} className="border-t">
+                        <td className="px-4 py-2">{row.id}</td>
+                        <td className="px-4 py-2">{row.fullName}</td>
+                        <td className="px-4 py-2">{row.badgeNumber}</td>
+                        <td className="px-4 py-2">{row.rank}</td>
+                        <td className="px-4 py-2">{row.department}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

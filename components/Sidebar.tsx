@@ -96,6 +96,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user }) => {
       subItems: [
         { name: 'Lista Personal', path: '/employees?v=list', icon: ClipboardList },
         { name: 'Nuevo Ingreso', path: '/employees?v=new', icon: UserPlus },
+        { name: 'Distribución de Personal', path: '/employees?v=distribution', icon: BarChart3 },
       ]
     },
     {
@@ -110,7 +111,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user }) => {
   ];
 
   const visibleMenu = menuStructure.filter(item =>
-    user.role === 'admin' || user.accessibleModules?.includes(item.moduleName) || false
+    user.role === 'Administrador' || user.accessibleModules?.includes(item.moduleName) || false
   );
 
   return (

@@ -496,8 +496,7 @@ const LoansPage: React.FC<LoansPageProps> = ({ user }) => {
       // Firmas manuales ahora, se elimina validación de firma digital
       if (new Date(mission.fechaRetornoProgramada) <= new Date()) return setError('La fecha de retorno debe ser futura.');
 
-      const newLoan: Loan = {
-         id: crypto.randomUUID(),
+      const newLoan: Partial<Loan> = {
          idOrden: orderId,
          loanDate: new Date().toISOString(),
          exitTime: new Date().toLocaleTimeString(),

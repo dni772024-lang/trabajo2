@@ -20,16 +20,41 @@ export const storage = {
         try {
             const result = await pool.query(`
         SELECT 
-          id, name, last_name as "lastName", username, rank, badge_number as "badgeNumber",
-          unit, institutional_email as "institutionalEmail", phone, password, role,
-          permissions, accessible_modules as "accessibleModules", 
-          session_expiration as "sessionExpiration", ip_restriction as "ipRestriction",
-          require_password_change as "requirePasswordChange", auto_lock as "autoLock",
-          status, created_at as "createdAt"
+          id, COALESCE(full_name, username) as name, 
+          COALESCE(last_name, '') as "lastName", username, 
+          COALESCE(rank, '') as rank, 
+          COALESCE(badge_number, '') as "badgeNumber",
+          COALESCE(unit, '') as unit, 
+          COALESCE(institutional_email, '') as "institutionalEmail", 
+          COALESCE(phone, '') as phone, password, role,
+          COALESCE(permissions, '{}') as permissions, 
+          COALESCE(accessible_modules, '{}') as "accessibleModules", 
+          COALESCE(session_expiration, '8h') as "sessionExpiration", 
+          COALESCE(ip_restriction, '') as "ipRestriction",
+          COALESCE(require_password_change, false) as "requirePasswordChange", 
+          COALESCE(auto_lock, true) as "autoLock",
+          COALESCE(status, 'Activo') as status, created_at as "createdAt"
         FROM users
         ORDER BY created_at DESC
       `);
-            return result.rows;
+            return result.rows.map(row => {
+                const parseJSON = (value: any): any[] => {
+                    if (Array.isArray(value)) return value;
+                    if (!value || value === '' || value === '[]' || value === '{}') return [];
+                    try {
+                        return JSON.parse(value);
+                    } catch (e) {
+                        console.warn('Failed to parse JSON:', value, e);
+                        return [];
+                    }
+                };
+            
+                return {
+                    ...row,
+                    permissions: parseJSON(row.permissions),
+                    accessibleModules: parseJSON(row.accessibleModules)
+                };
+            });
         } catch (error) {
             console.error('Error al obtener usuarios:', error);
             return [];
@@ -40,7 +65,7 @@ export const storage = {
         try {
             await pool.query(`
         INSERT INTO users (
-          id, name, last_name, username, rank, badge_number, unit,
+          id, full_name, last_name, username, rank, badge_number, unit,
           institutional_email, phone, password, role, permissions,
           accessible_modules, session_expiration, ip_restriction,
           require_password_change, auto_lock, status
@@ -62,7 +87,7 @@ export const storage = {
         try {
             await pool.query(`
         UPDATE users SET
-          name = $2, last_name = $3, username = $4, rank = $5,
+          full_name = $2, last_name = $3, username = $4, rank = $5,
           badge_number = $6, unit = $7, institutional_email = $8,
           phone = $9, password = $10, role = $11, permissions = $12,
           accessible_modules = $13, session_expiration = $14,
@@ -95,17 +120,52 @@ export const storage = {
     getEmployees: async (): Promise<Employee[]> => {
         try {
             const result = await pool.query(`
-        SELECT 
-          id, name, last_name as "lastName", rank, badge_number as "badgeNumber",
-          unit, department, position, hire_date as "hireDate",
-          institutional_email as "institutionalEmail", phone, photo,
-          supervisor_id as "supervisorId", physical_location as "physicalLocation",
-          observations, loan_limit as "loanLimit", critical_access as "criticalAccess",
-          access_level as "accessLevel", created_at as "createdAt"
+        SELECT
+          id,
+          COALESCE(full_name, '') as name,
+          '' as "lastName",
+          COALESCE(rank, '') as rank,
+          COALESCE(badge_number, '') as "badgeNumber",
+          '' as unit,
+          COALESCE(department, '') as department,
+          COALESCE(position, '') as position,
+          '' as "hireDate",
+          COALESCE(email, '') as "institutionalEmail",
+          COALESCE(phone, '') as phone,
+          COALESCE(photo, NULL) as photo,
+          NULL as "supervisorId",
+          '' as "physicalLocation",
+          '' as observations,
+          0 as "loanLimit",
+          false as "criticalAccess",
+          'Básico' as "accessLevel",
+          COALESCE(is_active, true) as "isActive",
+          created_at as "createdAt"
         FROM employees
         ORDER BY created_at DESC
-      `);
-            return result.rows;
+      `)
+
+            return result.rows.map(r => ({
+                id: String(r.id),
+                name: r.name,
+                lastName: r.lastName || '',
+                rank: r.rank || '',
+                badgeNumber: r.badgeNumber || '',
+                unit: r.unit || '',
+                department: r.department || '',
+                position: r.position || '',
+                hireDate: r.hireDate || '',
+                institutionalEmail: r.institutionalEmail || '',
+                phone: r.phone || '',
+                photo: r.photo || null,
+                supervisorId: r.supervisorId || undefined,
+                physicalLocation: r.physicalLocation || '',
+                observations: r.observations || '',
+                loanLimit: Number(r.loanLimit) || 0,
+                criticalAccess: Boolean(r.criticalAccess),
+                accessLevel: r.accessLevel || 'Básico',
+                createdAt: r.createdAt
+            }));
         } catch (error) {
             console.error('Error al obtener empleados:', error);
             return [];
@@ -114,21 +174,29 @@ export const storage = {
 
     addEmployee: async (employee: Employee): Promise<void> => {
         try {
-            await pool.query(`
+            // Let the database generate the numeric id (serial/integer)
+            const fullName = `${employee.name} ${employee.lastName}`.trim();
+            const result = await pool.query(`
         INSERT INTO employees (
-          id, name, last_name, rank, badge_number, unit, department,
-          position, hire_date, institutional_email, phone, photo,
-          supervisor_id, physical_location, observations, loan_limit,
-          critical_access, access_level
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          full_name, badge_number, department, position, email, phone, photo, rank, is_active, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        RETURNING id
       `, [
-                employee.id, employee.name, employee.lastName, employee.rank,
-                employee.badgeNumber, employee.unit, employee.department,
-                employee.position, employee.hireDate, employee.institutionalEmail,
-                employee.phone, employee.photo, employee.supervisorId,
-                employee.physicalLocation, employee.observations, employee.loanLimit,
-                employee.criticalAccess, employee.accessLevel
-            ]);
+                fullName,
+                employee.badgeNumber || '',
+                employee.department || '',
+                employee.position || '',
+                employee.institutionalEmail || '',
+                employee.phone || '',
+                employee.photo ?? null,
+                employee.rank || 'Agente',
+                true
+            ])
+
+            // If caller expects the id to be set, we could return it; for now just log
+            if (result.rows && result.rows[0]) {
+                console.log('Empleado creado con id:', result.rows[0].id);
+            }
         } catch (error) {
             console.error('Error al agregar empleado:', error);
             throw error;
@@ -137,21 +205,23 @@ export const storage = {
 
     updateEmployee: async (employee: Employee): Promise<void> => {
         try {
+            const fullName = `${employee.name} ${employee.lastName}`.trim();
             await pool.query(`
         UPDATE employees SET
-          name = $2, last_name = $3, rank = $4, badge_number = $5,
-          unit = $6, department = $7, position = $8, hire_date = $9,
-          institutional_email = $10, phone = $11, photo = $12,
-          supervisor_id = $13, physical_location = $14, observations = $15,
-          loan_limit = $16, critical_access = $17, access_level = $18
+          full_name = $2, badge_number = $3, department = $4, position = $5,
+          email = $6, phone = $7, photo = $8, rank = $9, is_active = $10
         WHERE id = $1
       `, [
-                employee.id, employee.name, employee.lastName, employee.rank,
-                employee.badgeNumber, employee.unit, employee.department,
-                employee.position, employee.hireDate, employee.institutionalEmail,
-                employee.phone, employee.photo, employee.supervisorId,
-                employee.physicalLocation, employee.observations, employee.loanLimit,
-                employee.criticalAccess, employee.accessLevel
+                employee.id,
+                fullName,
+                employee.badgeNumber || '',
+                employee.department || '',
+                employee.position || '',
+                employee.institutionalEmail || '',
+                employee.phone || '',
+                employee.photo ?? null,
+                employee.rank || 'Agente',
+                true
             ]);
         } catch (error) {
             console.error('Error al actualizar empleado:', error);
@@ -165,6 +235,46 @@ export const storage = {
         } catch (error) {
             console.error('Error al eliminar empleado:', error);
             throw error;
+        }
+    },
+
+    // ==================== EMPLOYEES DISTRIBUTION / STATS ====================
+    /**
+     * Returns aggregated counts grouped by department and rank.
+     * Output: [{ department, rank, count }]
+     */
+    getEmployeesDistribution: async (): Promise<{ department: string; rank: string; count: number }[]> => {
+        try {
+            const result = await pool.query(`
+        SELECT COALESCE(department, 'Sin Departamento') as department,
+               COALESCE(rank, 'Sin Rango') as rank,
+               COUNT(*)::int as count
+        FROM employees
+        GROUP BY COALESCE(department, 'Sin Departamento'), COALESCE(rank, 'Sin Rango')
+        ORDER BY COALESCE(department, 'Sin Departamento'), COALESCE(rank, 'Sin Rango')
+      `);
+            return result.rows.map(r => ({ department: r.department, rank: r.rank, count: Number(r.count) }));
+        } catch (error) {
+            console.error('Error al obtener distribución de empleados:', error);
+            return [];
+        }
+    },
+
+    /**
+     * Returns detailed list of employees filtered by department and rank
+     */
+    getEmployeesByDepartmentAndRank: async (department: string, rank: string): Promise<any[]> => {
+        try {
+            const result = await pool.query(`
+        SELECT id, full_name as "fullName", badge_number as "badgeNumber", rank, department
+        FROM employees
+        WHERE COALESCE(department, '') = $1 AND COALESCE(rank, '') = $2
+        ORDER BY full_name
+      `, [department, rank]);
+            return result.rows;
+        } catch (error) {
+            console.error('Error al obtener detalle por departamento y rango:', error);
+            return [];
         }
     },
 

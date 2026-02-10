@@ -105,6 +105,34 @@ app.get('/api/employees', async (req, res) => {
     res.json(data);
 });
 
+// Employees distribution summary
+app.get('/api/employees/distribution', async (req, res) => {
+    try {
+        const data = await storage.getEmployeesDistribution();
+        // Transform to nested structure by department
+        const grouped: Record<string, { rank: string; count: number }[]> = {};
+        for (const row of data) {
+            if (!grouped[row.department]) grouped[row.department] = [];
+            grouped[row.department].push({ rank: row.rank, count: row.count });
+        }
+        res.json({ summary: grouped });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Employees detail by department + rank
+app.get('/api/employees/filter', async (req, res) => {
+    try {
+        const department = String(req.query.department || '');
+        const rank = String(req.query.rank || '');
+        const data = await storage.getEmployeesByDepartmentAndRank(department, rank);
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/employees', async (req, res) => {
     try {
         await storage.addEmployee(req.body);
@@ -233,7 +261,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         // Query user from database (case-insensitive username)
         const result = await pool.query(
-            'SELECT id, username, password_hash, full_name, role, is_active FROM users WHERE LOWER(username) = LOWER($1)',
+            'SELECT * FROM users WHERE LOWER(username) = LOWER($1)',
             [username.trim()]
         );
 
@@ -245,24 +273,37 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const user = result.rows[0];
+        // DEBUG: Ver qué columnas existen realmente en la base de datos
+        console.log('🔍 Objeto usuario completo:', user);
+
+        // Intentar detectar campos con nombres alternativos
+        const dbPassword = user.password || user.contrasena || user.clave || user.pass || user.password_hash;
+        
+        // Determinar si está activo (soporte para is_active boolean o status string)
+        let isActive = true;
+        if (user.is_active !== undefined) {
+            isActive = user.is_active;
+        } else {
+            const dbStatus = user.status || user.estado || user.estatus || 'Activo';
+            isActive = String(dbStatus).toLowerCase() === 'activo' || String(dbStatus).toLowerCase() === 'active';
+        }
+
         console.log('👤 User found:', {
             id: user.id,
             username: user.username,
-            isActive: user.is_active,
-            passwordHashLength: user.password_hash?.length,
-            passwordHash: user.password_hash,
-            providedPassword: password,
-            passwordsMatch: user.password_hash === password
+            isActive: isActive,
+            passwordFound: !!dbPassword,
+            passwordMatch: dbPassword == password
         });
 
         // Check if user is active
-        if (!user.is_active) {
-            console.log('❌ User inactive');
+        if (!isActive) {
+            console.log(`❌ User inactive.`);
             return res.status(401).json({ error: 'Usuario inactivo' });
         }
 
         // Validate password (plain text comparison for now)
-        if (user.password_hash !== password) {
+        if (!dbPassword || dbPassword != password) {
             console.log('❌ Password mismatch');
             return res.status(401).json({ error: 'Credenciales incorrectas' });
         }
@@ -271,9 +312,12 @@ app.post('/api/auth/login', async (req, res) => {
         res.json({
             id: user.id,
             username: user.username,
-            fullName: user.full_name,
+            name: user.name || user.full_name,
+            lastName: user.last_name || '',
             role: user.role,
-            isActive: user.is_active
+            status: isActive ? 'Activo' : 'Inactivo',
+            accessibleModules: typeof user.accessible_modules === 'string' ? JSON.parse(user.accessible_modules) : (user.accessible_modules || []),
+            permissions: typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || [])
         });
 
         console.log(`✅ Login exitoso: ${user.username}`);
@@ -290,34 +334,64 @@ app.get('/api/stats/overview', async (req, res) => {
     try {
         const client = await pool.connect();
 
-        // Get counts
-        const equipmentResult = await client.query('SELECT COUNT(*), SUM(initial_value) as total_value FROM equipment');
-        const loansResult = await client.query('SELECT COUNT(*) FROM loans WHERE status = $1', ['active']);
-        const employeesResult = await client.query('SELECT COUNT(DISTINCT solicitante->>\'placa\') FROM loans WHERE status = $1', ['active']);
+        // Get counts with safer approach
+        let totalEquipment = 0, totalValue = 0, activeLoans = 0, activeEmployees = 0;
+        let availableCount = 0, maintenanceCount = 0;
 
-        // Get equipment status counts
-        const availableResult = await client.query('SELECT COUNT(*) FROM equipment WHERE status = $1', ['Disponible']);
-        const maintenanceResult = await client.query('SELECT COUNT(*) FROM equipment WHERE status = $1', ['Mantenimiento']);
+        try {
+            const equipmentResult = await client.query('SELECT COUNT(*) as count, COALESCE(SUM(initial_value), 0) as total_value FROM equipment');
+            if (equipmentResult.rows[0]) {
+                totalEquipment = parseInt(equipmentResult.rows[0].count || 0);
+                totalValue = parseFloat(equipmentResult.rows[0].total_value || 0);
+            }
+        } catch (e) {
+            console.warn('Equipment count query failed:', e.message);
+        }
 
-        // Calculate loans from last week for trend
-        const lastWeekResult = await client.query(
-            'SELECT COUNT(*) FROM loans WHERE loan_date >= NOW() - INTERVAL \'7 days\''
-        );
-        const prevWeekResult = await client.query(
-            'SELECT COUNT(*) FROM loans WHERE loan_date >= NOW() - INTERVAL \'14 days\' AND loan_date < NOW() - INTERVAL \'7 days\''
-        );
+        try {
+            const loansResult = await client.query('SELECT COUNT(*) as count FROM loans WHERE status = $1', ['active']);
+            if (loansResult.rows[0]) activeLoans = parseInt(loansResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Loans count query failed:', e.message);
+        }
 
-        const totalEquipment = parseInt(equipmentResult.rows[0].count);
-        const totalValue = parseFloat(equipmentResult.rows[0].total_value || 0);
-        const activeLoans = parseInt(loansResult.rows[0].count);
-        const activeEmployees = parseInt(employeesResult.rows[0].count);
-        const availableCount = parseInt(availableResult.rows[0].count);
-        const maintenanceCount = parseInt(maintenanceResult.rows[0].count);
+        try {
+            const employeesResult = await client.query("SELECT COUNT(DISTINCT l.solicitante->>'placa') as count FROM loans l WHERE l.status = $1", ['active']);
+            if (employeesResult.rows[0]) activeEmployees = parseInt(employeesResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Employees count query failed:', e.message);
+        }
 
-        const lastWeek = parseInt(lastWeekResult.rows[0].count);
-        const prevWeek = parseInt(prevWeekResult.rows[0].count);
+        try {
+            const availableResult = await client.query('SELECT COUNT(*) as count FROM equipment WHERE status = $1', ['Disponible']);
+            if (availableResult.rows[0]) availableCount = parseInt(availableResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Available equipment query failed:', e.message);
+        }
+
+        try {
+            const maintenanceResult = await client.query('SELECT COUNT(*) as count FROM equipment WHERE status = $1', ['Mantenimiento']);
+            if (maintenanceResult.rows[0]) maintenanceCount = parseInt(maintenanceResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Maintenance equipment query failed:', e.message);
+        }
+
+        let lastWeek = 0, prevWeek = 0;
+        try {
+            const lastWeekResult = await client.query('SELECT COUNT(*) as count FROM loans WHERE loan_date >= NOW() - INTERVAL \'7 days\'');
+            if (lastWeekResult.rows[0]) lastWeek = parseInt(lastWeekResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Last week query failed:', e.message);
+        }
+
+        try {
+            const prevWeekResult = await client.query('SELECT COUNT(*) as count FROM loans WHERE loan_date >= NOW() - INTERVAL \'14 days\' AND loan_date < NOW() - INTERVAL \'7 days\'');
+            if (prevWeekResult.rows[0]) prevWeek = parseInt(prevWeekResult.rows[0].count || 0);
+        } catch (e) {
+            console.warn('Previous week query failed:', e.message);
+        }
+
         const loansChangePercent = prevWeek > 0 ? ((lastWeek - prevWeek) / prevWeek * 100) : 0;
-
         const utilizationRate = totalEquipment > 0 ? (activeLoans / totalEquipment * 100) : 0;
         const availablePercent = totalEquipment > 0 ? (availableCount / totalEquipment * 100) : 0;
 
@@ -336,7 +410,18 @@ app.get('/api/stats/overview', async (req, res) => {
         });
     } catch (e: any) {
         console.error('Stats overview error:', e);
-        res.status(500).json({ error: e.message });
+        // Return default stats if all queries fail
+        res.json({
+            totalEquipment: 0,
+            totalValue: 0,
+            activeLoans: 0,
+            loansChangePercent: 0,
+            activeEmployees: 0,
+            utilizationRate: 0,
+            availableCount: 0,
+            availablePercent: 0,
+            maintenanceCount: 0
+        });
     }
 });
 
@@ -344,20 +429,26 @@ app.get('/api/stats/overview', async (req, res) => {
 app.get('/api/stats/loans-by-month', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query(`
-            SELECT 
-                TO_CHAR(loan_date, 'Mon YYYY') as month,
-                COUNT(*) as count
-            FROM loans
-            WHERE loan_date >= NOW() - INTERVAL '6 months'
-            GROUP BY TO_CHAR(loan_date, 'Mon YYYY'), DATE_TRUNC('month', loan_date)
-            ORDER BY DATE_TRUNC('month', loan_date) ASC
-        `);
-        client.release();
-        res.json(result.rows);
+        try {
+            const result = await client.query(`
+                SELECT 
+                    TO_CHAR(loan_date, 'Mon YYYY') as month,
+                    COUNT(*) as count
+                FROM loans
+                WHERE loan_date >= NOW() - INTERVAL '6 months'
+                GROUP BY TO_CHAR(loan_date, 'Mon YYYY'), DATE_TRUNC('month', loan_date)
+                ORDER BY DATE_TRUNC('month', loan_date) ASC
+            `);
+            client.release();
+            res.json(result.rows || []);
+        } catch (queryErr: any) {
+            client.release();
+            console.warn('Loans by month query failed:', queryErr.message);
+            res.json([]);
+        }
     } catch (e: any) {
         console.error('Loans by month error:', e);
-        res.status(500).json({ error: e.message });
+        res.json([]);
     }
 });
 
@@ -365,27 +456,33 @@ app.get('/api/stats/loans-by-month', async (req, res) => {
 app.get('/api/stats/equipment-by-category', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query(`
-            SELECT 
-                category,
-                COUNT(*) as count
-            FROM equipment
-            GROUP BY category
-            ORDER BY count DESC
-        `);
+        try {
+            const result = await client.query(`
+                SELECT 
+                    category,
+                    COUNT(*) as count
+                FROM equipment
+                GROUP BY category
+                ORDER BY count DESC
+            `);
 
-        const total = result.rows.reduce((sum, row) => sum + parseInt(row.count), 0);
-        const data = result.rows.map(row => ({
-            category: row.category,
-            count: parseInt(row.count),
-            percentage: total > 0 ? Math.round((parseInt(row.count) / total * 100) * 10) / 10 : 0
-        }));
+            const total = result.rows.reduce((sum, row) => sum + parseInt(row.count), 0);
+            const data = result.rows.map(row => ({
+                category: row.category,
+                count: parseInt(row.count),
+                percentage: total > 0 ? Math.round((parseInt(row.count) / total * 100) * 10) / 10 : 0
+            }));
 
-        client.release();
-        res.json(data);
+            client.release();
+            res.json(data);
+        } catch (queryErr: any) {
+            client.release();
+            console.warn('Equipment by category query failed:', queryErr.message);
+            res.json([]);
+        }
     } catch (e: any) {
         console.error('Equipment by category error:', e);
-        res.status(500).json({ error: e.message });
+        res.json([]);
     }
 });
 
@@ -393,31 +490,37 @@ app.get('/api/stats/equipment-by-category', async (req, res) => {
 app.get('/api/stats/top-equipment', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query(`
-            SELECT 
-                e.id,
-                e.brand || ' ' || e.model as name,
-                e.category,
-                COUNT(li.id) as loan_count
-            FROM equipment e
-            LEFT JOIN loan_items li ON e.id = li.equipment_id
-            GROUP BY e.id, e.brand, e.model, e.category
-            ORDER BY loan_count DESC
-            LIMIT 5
-        `);
+        try {
+            const result = await client.query(`
+                SELECT 
+                    e.id,
+                    e.brand || ' ' || e.model as name,
+                    e.category,
+                    COUNT(li.id) as loan_count
+                FROM equipment e
+                LEFT JOIN loan_items li ON e.id = li.equipment_id
+                GROUP BY e.id, e.brand, e.model, e.category
+                ORDER BY loan_count DESC
+                LIMIT 5
+            `);
 
-        const data = result.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            category: row.category,
-            loanCount: parseInt(row.loan_count)
-        }));
+            const data = result.rows.map(row => ({
+                id: row.id,
+                name: row.name,
+                category: row.category,
+                loanCount: parseInt(row.loan_count)
+            }));
 
-        client.release();
-        res.json(data);
+            client.release();
+            res.json(data);
+        } catch (queryErr: any) {
+            client.release();
+            console.warn('Top equipment query failed:', queryErr.message);
+            res.json([]);
+        }
     } catch (e: any) {
         console.error('Top equipment error:', e);
-        res.status(500).json({ error: e.message });
+        res.json([]);
     }
 });
 
@@ -425,31 +528,38 @@ app.get('/api/stats/top-equipment', async (req, res) => {
 app.get('/api/stats/top-employees', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query(`
-            SELECT 
-                emp.id,
-                emp.name || ' ' || emp.last_name as name,
-                emp.department,
-                COUNT(l.id) as active_loans
-            FROM employees emp
-            JOIN loans l ON l.solicitante->>'placa' = emp.badge_number AND l.status = 'active'
-            GROUP BY emp.id, emp.name, emp.last_name, emp.department
-            ORDER BY active_loans DESC
-            LIMIT 5
-        `);
+        try {
+            const result = await client.query(`
+                SELECT 
+                    COUNT(DISTINCT l.solicitante->>'placa') as active_loans,
+                    MAX(emp.id) as id,
+                    MAX(emp.name || ' ' || emp.last_name) as name,
+                    MAX(emp.department) as department
+                FROM loans l
+                LEFT JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
+                WHERE l.status = 'active'
+                GROUP BY l.solicitante->>'placa'
+                ORDER BY active_loans DESC
+                LIMIT 5
+            `);
 
-        const data = result.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            department: row.department,
-            activeLoans: parseInt(row.active_loans)
-        }));
+            const data = result.rows.map(row => ({
+                id: row.id,
+                name: row.name,
+                department: row.department,
+                activeLoans: parseInt(row.active_loans)
+            }));
 
-        client.release();
-        res.json(data);
+            client.release();
+            res.json(data);
+        } catch (queryErr: any) {
+            client.release();
+            console.warn('Top employees query failed:', queryErr.message);
+            res.json([]);
+        }
     } catch (e: any) {
         console.error('Top employees error:', e);
-        res.status(500).json({ error: e.message });
+        res.json([]);
     }
 });
 
@@ -458,43 +568,54 @@ app.get('/api/stats/alerts', async (req, res) => {
     try {
         const client = await pool.connect();
 
-        // Equipment needing maintenance (based on condition)
-        const maintenanceResult = await client.query(`
-            SELECT 
-                id,
-                brand || ' ' || model as name,
-                category
-            FROM equipment
-            WHERE status != 'Retirado' 
-            AND condition IN ('Malo', 'Regular')
-            LIMIT 10
-        `);
+        let maintenanceResult = { rows: [] }, overdueResult = { rows: [] }, damagedResult = { rows: [] };
 
-        // Overdue loans (> 25 days)
-        const overdueResult = await client.query(`
-            SELECT 
-                l.id,
-                emp.name || ' ' || emp.last_name as employee_name,
-                l.loan_date,
-                NOW()::date - l.loan_date::date as days_active
-            FROM loans l
-            JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
-            WHERE l.status = 'active'
-            AND NOW()::date - l.loan_date::date > 25
-            ORDER BY days_active DESC
-            LIMIT 10
-        `);
+        try {
+            maintenanceResult = await client.query(`
+                SELECT 
+                    id,
+                    brand || ' ' || model as name,
+                    category
+                FROM equipment
+                WHERE status != 'Retirado' 
+                AND condition IN ('Malo', 'Regular')
+                LIMIT 10
+            `);
+        } catch (e) {
+            console.warn('Maintenance query failed:', e.message);
+        }
 
-        // Damaged equipment
-        const damagedResult = await client.query(`
-            SELECT 
-                id,
-                brand || ' ' || model as name,
-                category
-            FROM equipment
-            WHERE status = 'Dañado'
-            LIMIT 10
-        `);
+        try {
+            overdueResult = await client.query(`
+                SELECT 
+                    l.id,
+                    COALESCE(emp.name || ' ' || emp.last_name, l.solicitante->>'nombre') as employee_name,
+                    l.loan_date,
+                    EXTRACT(DAY FROM (NOW() - l.loan_date)) as days_active
+                FROM loans l
+                LEFT JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
+                WHERE l.status = 'active'
+                AND EXTRACT(DAY FROM (NOW() - l.loan_date)) > 25
+                ORDER BY days_active DESC
+                LIMIT 10
+            `);
+        } catch (e) {
+            console.warn('Overdue loans query failed:', e.message);
+        }
+
+        try {
+            damagedResult = await client.query(`
+                SELECT 
+                    id,
+                    brand || ' ' || model as name,
+                    category
+                FROM equipment
+                WHERE status = 'Dañado'
+                LIMIT 10
+            `);
+        } catch (e) {
+            console.warn('Damaged equipment query failed:', e.message);
+        }
 
         client.release();
 
@@ -518,10 +639,25 @@ app.get('/api/stats/alerts', async (req, res) => {
         });
     } catch (e: any) {
         console.error('Alerts error:', e);
-        res.status(500).json({ error: e.message });
+        res.json({
+            maintenanceDue: [],
+            overdueLoans: [],
+            damagedEquipment: []
+        });
     }
 });
 
+
+// Verificar conexión a Base de Datos al iniciar
+pool.connect()
+    .then(client => {
+        console.log('✅ Conexión a Base de Datos establecida correctamente');
+        client.release();
+    })
+    .catch(err => {
+        console.error('❌ Error fatal: No se pudo conectar a la Base de Datos.', err.message);
+        console.error('   Verifica que PostgreSQL esté corriendo y las credenciales en .env sean correctas.');
+    });
 
 // Iniciar servidor
 const server = app.listen(port, () => {

@@ -88,9 +88,8 @@ const Register: React.FC = () => {
           setError('Este ID de usuario ya está en uso.');
           return;
         }
-        const newUser: User = {
+        const newUser: Partial<User> = {
           ...formData as User,
-          id: crypto.randomUUID(),
           name: formData.username || '',
           lastName: '',
           rank: 'Oficial',

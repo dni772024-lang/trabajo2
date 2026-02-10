@@ -8,8 +8,8 @@ const config = {
     user: process.env.DB_USER || 'postgres',
     host: process.env.DB_HOST || 'localhost',
     database: process.env.DB_NAME || 'equipment_control',
-    password: process.env.DB_PASSWORD || 'postgres',
-    port: parseInt(process.env.DB_PORT || '5432'),
+    password: process.env.DB_PASSWORD || 'Salayer*109',
+    port: parseInt(process.env.DB_PORT || '5433'),
 };
 
 export const pool = new Pool(config);

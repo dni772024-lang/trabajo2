@@ -230,7 +230,7 @@ app.get('/api/stats/overview', async (req, res) => {
         // Get counts
         const equipmentResult = await client.query('SELECT COUNT(*), SUM(initial_value) as total_value FROM equipment');
         const loansResult = await client.query('SELECT COUNT(*) FROM loans WHERE status = $1', ['active']);
-        const employeesResult = await client.query('SELECT COUNT(DISTINCT solicitante->>\'placa\') FROM loans WHERE status = $1', ['active']);
+        const employeesResult = await client.query("SELECT COUNT(DISTINCT l.solicitante->>'placa') as count FROM loans l WHERE l.status = $1", ['active']);
 
         // Get equipment status counts
         const availableResult = await client.query('SELECT COUNT(*) FROM equipment WHERE status = $1', ['Disponible']);
@@ -364,16 +364,17 @@ app.get('/api/stats/top-employees', async (req, res) => {
         const client = await pool.connect();
         const result = await client.query(`
             SELECT 
-                emp.id,
-                emp.name || ' ' || emp.last_name as name,
-                emp.department,
-                COUNT(l.id) as active_loans
-            FROM employees emp
-            JOIN loans l ON l.solicitante->>'placa' = emp.badge_number AND l.status = 'active'
-            GROUP BY emp.id, emp.name, emp.last_name, emp.department
+                COUNT(DISTINCT l.solicitante->>'placa') as active_loans,
+                MAX(emp.id) as id,
+                MAX(emp.name || ' ' || emp.last_name) as name,
+                MAX(emp.department) as department
+            FROM loans l
+            LEFT JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
+            WHERE l.status = 'active'
+            GROUP BY l.solicitante->>'placa'
             ORDER BY active_loans DESC
             LIMIT 5
-        `);
+        `);;
 
         const data = result.rows.map(row => ({
             id: row.id,
@@ -411,13 +412,13 @@ app.get('/api/stats/alerts', async (req, res) => {
         const overdueResult = await client.query(`
             SELECT 
                 l.id,
-                emp.name || ' ' || emp.last_name as employee_name,
+                COALESCE(emp.name || ' ' || emp.last_name, l.solicitante->>'nombre') as employee_name,
                 l.loan_date,
-                NOW()::date - l.loan_date::date as days_active
+                EXTRACT(DAY FROM (NOW() - l.loan_date)) as days_active
             FROM loans l
-            JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
+            LEFT JOIN employees emp ON l.solicitante->>'placa' = emp.badge_number
             WHERE l.status = 'active'
-            AND NOW()::date - l.loan_date::date > 25
+            AND EXTRACT(DAY FROM (NOW() - l.loan_date)) > 25
             ORDER BY days_active DESC
             LIMIT 10
         `);

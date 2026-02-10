@@ -130,8 +130,8 @@ const EquipmentPage: React.FC = () => {
             await storage.updateEquipment({ ...dataToSave, id: editingId } as Equipment);
             setSuccessMsg('¡Registro actualizado!');
          } else {
-            const finalEquip: Equipment = { ...dataToSave as Equipment, id: crypto.randomUUID() };
-            await storage.addEquipment(finalEquip);
+            const finalEquip: Partial<Equipment> = dataToSave as Equipment;
+            await storage.addEquipment(finalEquip as Equipment);
             setSuccessMsg('¡Registro exitoso!');
          }
 
